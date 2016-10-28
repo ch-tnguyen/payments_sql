@@ -20,6 +20,8 @@ BEGIN
 		ELSE
 			RETURN mid_month <= end_date;
 		END IF;
+	ELSE
+		RETURN FALSE;
 	END IF;
 END;
 $$ LANGUAGE plpgsql;
@@ -28,7 +30,20 @@ $$ LANGUAGE plpgsql;
 DROP FUNCTION IF EXISTS count_dependents(TEXT, INT, INT, INT, INT);
 CREATE FUNCTION count_dependents(relationship TEXT, sid INT, pid INT, year INT, month INT)
 RETURNS INT AS $$
+DECLARE
+	end_month int;
+	end_year int;
 BEGIN
+
+	IF (month = 12)
+	THEN
+		end_month = 1;
+		end_year = year+1;
+	ELSE
+		end_month = month+1;
+		end_year = year;
+	END IF;
+
 	return count(*)
 	 	FROM hibernate.plan_membership
 	 	LEFT JOIN hibernate.plan
@@ -44,7 +59,7 @@ BEGIN
 	 		AND sponsorship.relationship_type = relationship
 			AND (
 				-- active during month
-				plan_membership.start_date < make_timestamp(year, month+1, 1, 0, 0, 0)
+				plan_membership.start_date < make_timestamp(end_year, end_month, 1, 0, 0, 0)
 				AND
 				make_timestamp(year, month, 1, 0, 0, 0) < plan_membership.end_date) 
 	 	GROUP BY plan_membership.subscriber_id, plan_membership.plan_id;
@@ -110,6 +125,17 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+SELECT calculate_coverage_tier(3423, 1108, 2015, 12);
+SELECT calculate_coverage_tier(3423, 1108, 2016, 01);
+SELECT calculate_coverage_tier(3423, 1108, 2016, 02);
+SELECT calculate_coverage_tier(3423, 1108, 2016, 03);
+SELECT calculate_coverage_tier(3423, 1108, 2016, 04);
+SELECT calculate_coverage_tier(3423, 1108, 2016, 05);
+SELECT calculate_coverage_tier(3423, 1108, 2016, 06);
+SELECT calculate_coverage_tier(3423, 1108, 2016, 07);
 SELECT calculate_coverage_tier(3423, 1108, 2016, 08);
-SELECT count_dependents('spouse', 3423, 1108, 2016, 08) as num_spouse;
-SELECT count_dependents('child', 3423, 1108, 2016, 08) as num_children;
+SELECT calculate_coverage_tier(3423, 1108, 2016, 09);
+SELECT calculate_coverage_tier(3423, 1108, 2016, 10);
+SELECT calculate_coverage_tier(3423, 1108, 2016, 11);
+SELECT calculate_coverage_tier(3423, 1108, 2016, 12);
+SELECT calculate_coverage_tier(3423, 1108, 2017, 01);
