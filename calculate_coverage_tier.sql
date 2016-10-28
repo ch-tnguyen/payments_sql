@@ -1,23 +1,115 @@
-DROP FUNCTION IF EXISTS calculate_coverage_tier(subscriber_id INT, plan_id INT);
+-- need to calculate coverage tier for person for month
+-- is the person coverege in the month, use wash rule
+-- do they have a spouse covered in the month
+-- do they have any children covered in the month?
+
+
+DROP FUNCTION IF EXISTS wash_rule(INTEGER, INTEGER, DATE, DATE);
+CREATE FUNCTION wash_rule(year INTEGER, month INTEGER, start_date DATE, end_date DATE)
+RETURNS boolean AS $$
+DECLARE
+	mid_month timestamp;
+BEGIN
+	mid_month := make_timestamp(year, month, 16, 0, 0, 0); -- all of 15th is included in first half of month
+	
+	IF start_date < mid_month
+	THEN
+		IF end_date IS NULL
+		THEN
+			RETURN TRUE;
+		ELSE
+			RETURN mid_month <= end_date;
+		END IF;
+	END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+
+DROP FUNCTION IF EXISTS count_dependents(TEXT, INT, INT, INT, INT);
+CREATE FUNCTION count_dependents(relationship TEXT, sid INT, pid INT, year INT, month INT)
+RETURNS INT AS $$
+BEGIN
+	return count(*)
+	 	FROM hibernate.plan_membership
+	 	LEFT JOIN hibernate.plan
+	 		ON plan.id = plan_membership.plan_id
+	 	LEFT JOIN hibernate.sponsorship
+	 		ON sponsorship.subscriber_id = plan_membership.subscriber_id
+			AND sponsorship.sponsor_id = plan.sponsor_id
+			AND sponsorship.person_id = plan_membership.person_id
+	 	WHERE
+	 		plan_membership.subscriber_id = sid
+	 		AND plan_membership.plan_id = pid
+	 		AND plan_membership.person_id != plan_membership.subscriber_id
+	 		AND sponsorship.relationship_type = relationship
+			AND (
+				-- active during month
+				plan_membership.start_date < make_timestamp(year, month+1, 1, 0, 0, 0)
+				AND
+				make_timestamp(year, month, 1, 0, 0, 0) < plan_membership.end_date) 
+	 	GROUP BY plan_membership.subscriber_id, plan_membership.plan_id;
+END;
+$$ LANGUAGE plpgsql;
+
+
 -- returns [-/E][-/S][-/K/C]
-CREATE FUNCTION calculate_coverage_tier(subscriber_id INT, plan_id INT)
+DROP FUNCTION IF EXISTS calculate_coverage_tier(INT, INT, INT, INT);
+CREATE FUNCTION calculate_coverage_tier(sid INT, pid INT, year INT, month INT)
 RETURNS TEXT AS $$
 DECLARE
 	self TEXT;
 	spouse TEXT;
 	children TEXT;
+	sdate DATE;
+	edate DATE;
+	c INT;
 BEGIN
-	IF EXISTS ()
+
+	-- determine if self is covered
+	IF EXISTS (SELECT DISTINCT 1
+			   FROM hibernate.plan_membership AS pm
+			   WHERE pm.subscriber_id = sid AND pm.plan_id = pid)
 	THEN
-		SELECT 'E' into self;
+		SELECT pm.start_date, pm.end_date INTO sdate, edate
+		FROM hibernate.plan_membership AS pm
+		WHERE pm.subscriber_id = sid AND pm.plan_id = pid;
+		
+		IF wash_rule(year, month, sdate, edate)
+		THEN
+			SELECT 'E' INTO self;
+		ELSE
+			SELECT '-' INTO self;
+		END IF;
+		
 	ELSE
-		SELECT '-' into self;
+		SELECT '-' INTO self;
 	END IF;
 	
-	SELECT 'S' into spouse;
-	SELECT 'K' into children;
+	-- determine if spouse is covered
+	SELECT count_dependents('spouse', sid, pid, year, month) INTO c;
+	IF (c IS NOT NULL AND c > 0)
+	THEN
+		SELECT 'S' INTO spouse;
+	ELSE
+		SELECT '-' INTO spouse;
+	END IF;
+	
+	-- determin if children are covered
+	SELECT count_dependents('spouse', sid, pid, year, month) INTO c;
+	IF (c IS NOT NULL AND c = 1)
+	THEN
+		SELECT 'K' INTO children;
+	ELSIF (c != NULL AND c > 1)
+	THEN
+		SELECT 'C' INTO children;
+	ELSE
+		SELECT '-' INTO children;
+	END IF;
+	
 	return self || spouse || children;
 END;
 $$ LANGUAGE plpgsql;
 
-SELECT calculate_coverage_tier(0, 0);
+SELECT calculate_coverage_tier(3423, 1108, 2016, 08);
+SELECT count_dependents('spouse', 3423, 1108, 2016, 08) as num_spouse;
+SELECT count_dependents('child', 3423, 1108, 2016, 08) as num_children;
