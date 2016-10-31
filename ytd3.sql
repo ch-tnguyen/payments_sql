@@ -79,7 +79,6 @@ DECLARE
 	edate DATE;
 	c INT;
 BEGIN
-
 	-- determine if self is covered
 	IF EXISTS (SELECT DISTINCT 1
 			   FROM hibernate.plan_membership AS pm
@@ -95,7 +94,6 @@ BEGIN
 		ELSE
 			SELECT '-' INTO self;
 		END IF;
-		
 	ELSE
 		SELECT '-' INTO self;
 	END IF;
@@ -109,7 +107,7 @@ BEGIN
 		SELECT '-' INTO spouse;
 	END IF;
 	
-	-- determin if children are covered
+	-- determine how many children are covered
 	SELECT count_dependents('spouse', sid, pid, year, month) INTO c;
 	IF (c IS NOT NULL AND c = 1)
 	THEN
@@ -130,17 +128,20 @@ select
 	pm.subscriber_id,
 	pm.plan_id,
 	sponsorship.sponsor_id,
-	date_part('year', CURRENT_DATE) as year,
-	generate_series(1, cast(date_part('month', CURRENT_DATE) as INT)) as month,
-	1 as count,
+	pm.start_date,
+	pm.end_date,
 	plan.name as "Plan Name",
 	partner.name as "Partner",
 	sponsor.name as "Sponsor",
 	'tbd' as "Subsidiary",
 	sponsorship.sponsorship_type as "Relationship",
-	calculate_coverage_tier(pm.subscriber_id, plan.id, cast(date_part('year', CURRENT_DATE) as INT), cast(date_part('month', CURRENT_DATE) as INT)) as "Tier",
-	pm.is_cobra as "COBRA"
+	pm.is_cobra as "COBRA",
+	date_part('year', CURRENT_DATE) as year,
+	year_months_to_date.month,
+	wash_rule(cast(date_part('year', CURRENT_DATE) as INT), year_months_to_date.month, pm.start_date, pm.end_date) as count,
+	calculate_coverage_tier(pm.subscriber_id, plan.id, cast(date_part('year', CURRENT_DATE) as INT), year_months_to_date.month) as "Tier"
 from hibernate.plan_membership as pm
+cross join (select generate_series(1, cast(date_part('month', CURRENT_DATE) as INT)) as month) as year_months_to_date
 left join hibernate.plan
 	on pm.plan_id = plan.id
 left join hibernate.partner
@@ -151,5 +152,5 @@ left join hibernate.sponsorship
 left join hibernate.sponsor
 	on sponsorship.sponsor_id = sponsor.id
 where plan.type = 'MEDICAL' and sponsor.id is not null
-group by pm.person_id, pm.subscriber_id, pm.plan_id, sponsorship.sponsor_id, plan.id, plan.name, partner.name, sponsor.name, sponsorship.sponsorship_type, pm.is_cobra
-order by pm.person_id, month;
+group by pm.person_id, pm.subscriber_id, pm.plan_id, sponsorship.sponsor_id, plan.id, plan.name, partner.name, sponsor.name, sponsorship.sponsorship_type, pm.is_cobra, year_months_to_date.month, pm.start_date, pm.end_date
+order by pm.person_id, pm.subscriber_id, pm.plan_id, sponsorship.sponsor_id, year, month;
